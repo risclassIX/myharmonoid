@@ -22,37 +22,29 @@ jobs:
       - name: Enable Windows Support
         run: flutter config --enable-windows-desktop
 
-      - name: Inject Bypasses, Video Player & Suggestion Algorithm
+      - name: Inject Custom Bypasses & Features
         shell: powershell
         run: |
-          Write-Host "1. Bypassing Subscription/Supporter Check..."
+          Write-Host "1. Bypassing Subscription Check..."
           Get-ChildItem -Path lib -Recurse -Filter "*.dart" | ForEach-Object {
-            (Get-Content $_.FullName) -replace 'bool get isSupporter => .*', 'bool get isSupporter => true;' | Set-Content $_.FullName
+            $content = Get-Content $_.FullName -Raw
+            if ($content -match "isSupporter") {
+              $updated = $content -replace 'bool\s+get\s+isSupporter\s*=>\s*[^;]+;', 'bool get isSupporter => true;'
+              Set-Content -Path $_.FullName -Value $updated
+            }
           }
 
-          Write-Host "2. Injecting Offline Recommendation Logic..."
-          $algoCode = @"
+          Write-Host "2. Adding Offline Recommendation Algorithm..."
+          $algo = @"
+
+          // Custom Offline Recommendation Algorithm
           List<dynamic> getSmartOfflineSuggestions(List<dynamic> allTracks, dynamic currentTrack) {
             var unplayed = allTracks.where((t) => (t.playCount ?? 0) == 0).toList()..shuffle();
             var lowPlayed = allTracks.where((t) => (t.playCount ?? 0) > 0 && (t.playCount ?? 0) < 3).toList()..shuffle();
-            var sameGenre = allTracks.where((t) => t.genre == currentTrack?.genre && t != currentTrack).toList()..shuffle();
-            return [...unplayed.take(5), ...lowPlayed.take(3), ...sameGenre.take(2)];
+            return [...unplayed.take(5), ...lowPlayed.take(5)];
           }
           "@
-          Add-Content -Path "lib/main.dart" -Value "`n$algoCode"
-
-          Write-Host "3. Adding SUGGESTIONS Tab to Nav Bar..."
-          $navFile = "lib/interface/navigation_bar.dart"
-          if (Test-Path $navFile) {
-            (Get-Content $navFile) -replace "Tab\(text: 'GENRES'\),", "Tab(text: 'GENRES'), Tab(text: 'SUGGESTIONS')," | Set-Content $navFile
-          }
-
-          Write-Host "4. Injecting Floating Video Player Icon..."
-          $playerFile = "lib/interface/now_playing_bar.dart"
-          if (Test-Path $playerFile) {
-            $videoCode = 'IconButton(icon: Icon(Icons.video_collection), onPressed: () => showDialog(context: context, builder: (c) => Dialog(child: SizedBox(width: 800, height: 450, child: Stack(children: [Video(controller: controller), Positioned(top: 8, right: 8, child: IconButton(icon: Icon(Icons.close), onPressed: () => Navigator.of(c).pop()))]))))),'
-            (Get-Content $playerFile) -replace "IconButton\(icon: Icon\(Icons.queue_music\)", "$videoCode IconButton(icon: Icon(Icons.queue_music)" | Set-Content $playerFile
-          }
+          Add-Content -Path "lib/main.dart" -Value $algo
 
       - name: Build Windows Executable
         run: flutter build windows --release
